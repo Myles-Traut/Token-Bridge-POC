@@ -28,16 +28,16 @@ contract UniswapTests is Test {
         deployer.run();
 
         token = new Token();
-        token2 = new Token();
+        weth.deposit{value: 10 ether}();
 
         token.approve(address(router), type(uint256).max);
-        token2.approve(address(router), type(uint256).max);
+        weth.approve(address(router), type(uint256).max);
 
         IUniswapV2Router01(router).addLiquidity(
             address(token),
-            address(token2),
+            address(weth),
             token.balanceOf(address(this)), 
-            token2.balanceOf(address(this)), 
+            weth.balanceOf(address(this)), 
             0,
             0,
             address(this),
@@ -46,13 +46,12 @@ contract UniswapTests is Test {
 
         deal(user, 10 ether);
         token.mint(user, 10 ether);
-        token2.mint(user, 10 ether);
     }
 
     function test_TokenSwap() public {
         address[] memory path = new address[](2);
         path[0] = address(token);
-        path[1] = address(token2);
+        path[1] = address(weth);
 
         assertEq(address(tokenSwap.router()), address(router));
         vm.startPrank(user);
@@ -60,6 +59,7 @@ contract UniswapTests is Test {
         uint256[] memory amounts = tokenSwap.swapExactTokensForTokens(1 ether, 0, path, user, block.timestamp + 1000);
         console.logUint(amounts[1]);
         console.logUint(token.balanceOf(user));
+        console.logUint(weth.balanceOf(user));
     }
 
     function test_UniswapFactory() public {
