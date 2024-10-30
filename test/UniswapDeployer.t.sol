@@ -18,6 +18,7 @@ contract UniswapTests is Test {
     IUniswapV2Router02 public router = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
     TokenSwap public tokenSwap;
     Token public token;
+    Token public token2;
 
     address user = makeAddr("user");
 
@@ -27,12 +28,16 @@ contract UniswapTests is Test {
         deployer.run();
 
         token = new Token();
+        token2 = new Token();
 
         token.approve(address(router), type(uint256).max);
-        
-        IUniswapV2Router01(router).addLiquidityETH{value: 10 ether}(
-            address(token), 
+        token2.approve(address(router), type(uint256).max);
+
+        IUniswapV2Router01(router).addLiquidity(
+            address(token),
+            address(token2),
             token.balanceOf(address(this)), 
+            token2.balanceOf(address(this)), 
             0,
             0,
             address(this),
@@ -40,16 +45,19 @@ contract UniswapTests is Test {
         );
 
         deal(user, 10 ether);
+        token.mint(user, 10 ether);
+        token2.mint(user, 10 ether);
     }
 
     function test_TokenSwap() public {
         address[] memory path = new address[](2);
-        path[0] = address(weth);
-        path[1] = address(token);
+        path[0] = address(token);
+        path[1] = address(token2);
 
         assertEq(address(tokenSwap.router()), address(router));
         vm.startPrank(user);
-        uint256[] memory amounts = tokenSwap.swapExactETHForTokens{value: 1 ether}(0, path, user, block.timestamp + 1000);
+        token.approve(address(tokenSwap), 1 ether);
+        uint256[] memory amounts = tokenSwap.swapExactTokensForTokens(1 ether, 0, path, user, block.timestamp + 1000);
         console.logUint(amounts[1]);
         console.logUint(token.balanceOf(user));
     }
