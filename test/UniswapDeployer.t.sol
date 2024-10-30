@@ -11,6 +11,12 @@ import {IUniswapV2Router01} from "@uniswap/v2-periphery/contracts/interfaces/IUn
 
 import {Token} from "../src/Token.sol";
 import {TokenSwap} from "../src/TokenSwap.sol";
+import {TokenSender} from "../src/TokenSender.sol";
+
+import {IRouterClient, LinkToken, WETH9} from "@chainlink/local/src/ccip/CCIPLocalSimulator.sol";
+import {CCIPLocalSimulator} from "@chainlink/local/src/ccip/CCIPLocalSimulator.sol";
+
+import {Client} from"@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 
 contract UniswapTests is Test {
     IUniswapV2Factory public factory = IUniswapV2Factory(0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f);
@@ -19,13 +25,39 @@ contract UniswapTests is Test {
     TokenSwap public tokenSwap;
     Token public token;
     Token public token2;
+    TokenSender public tokenSender;
+    CCIPLocalSimulator public ccipLocalSimulator;
+
+    uint64 public chainSelector;
+     IRouterClient public sourceRouter;
+     IRouterClient public destinationRouter;
+     WETH9 public wrappedNative;
+     LinkToken public linkToken;
 
     address user = makeAddr("user");
+    address owner = makeAddr("owner");
 
     function setUp() public {
         UniswapDeployer deployer = new UniswapDeployer();
-        tokenSwap = new TokenSwap(address(router));
         deployer.run();
+
+        ccipLocalSimulator = new CCIPLocalSimulator();
+
+        (
+            chainSelector,
+            sourceRouter,
+            destinationRouter,
+            wrappedNative,
+            linkToken,,
+        ) = ccipLocalSimulator.configuration();
+
+        tokenSwap = new TokenSwap(address(router));
+
+        vm.startPrank(owner);
+
+        //IUniswapV2Router02 _swapRouter, address _WETH9, address _ccipRouter, address _link, address _receiver
+        tokenSender = new TokenSender(router, address(weth), address(sourceRouter), address(linkToken), address(0));
+        vm.stopPrank();
 
         token = new Token();
         weth.deposit{value: 10 ether}();
@@ -46,6 +78,18 @@ contract UniswapTests is Test {
 
         deal(user, 10 ether);
         token.mint(user, 10 ether);
+    }
+
+    function test_TokenSender() public {
+        token.mint(user, 10 ether);
+        vm.startPrank(owner);
+        tokenSender.allowlistDestinationChain(chainSelector, true);
+        vm.stopPrank();
+
+        vm.startPrank(user);
+        token.approve(address(tokenSender), 1 ether);
+        tokenSender.bridge(chainSelector, address(token), 1 ether);
+        vm.stopPrank();
     }
 
     function test_TokenSwap() public {
