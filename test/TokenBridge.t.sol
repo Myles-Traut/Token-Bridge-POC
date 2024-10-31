@@ -3,6 +3,7 @@ pragma solidity 0.8.23;
 
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
+
 import {UniswapDeployer} from "../script/UniswapDeployer.s.sol";
 import {IUniswapV2Factory} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 import {WETH} from "solmate/tokens/WETH.sol";
@@ -10,7 +11,6 @@ import {IUniswapV2Router02} from "@uniswap/v2-periphery/contracts/interfaces/IUn
 import {IUniswapV2Router01} from "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router01.sol";
 
 import {Token} from "../src/Token.sol";
-import {TokenSwap} from "../src/TokenSwap.sol";
 import {TokenSender} from "../src/TokenSender.sol";
 import {TokenReceiver} from "../src/TokenReceiver.sol";
 
@@ -19,15 +19,15 @@ import {CCIPLocalSimulator} from "@chainlink/local/src/ccip/CCIPLocalSimulator.s
 
 import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 
-contract UniswapTests is Test {
+contract TokenBridgeTests is Test {
     IUniswapV2Factory public factory = IUniswapV2Factory(0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f);
     WETH public weth = WETH(payable(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2));
     IUniswapV2Router02 public router = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
-    TokenSwap public tokenSwap;
+
     Token public token;
-    Token public token2;
     TokenSender public tokenSender;
     TokenReceiver public tokenReceiver;
+
     CCIPLocalSimulator public ccipLocalSimulator;
 
     uint64 public chainSelector;
@@ -53,21 +53,18 @@ contract UniswapTests is Test {
         (chainSelector, sourceRouter, destinationRouter, wrappedNative, linkToken,,) =
             ccipLocalSimulator.configuration();
 
-        tokenSwap = new TokenSwap(address(router));
-
         vm.startPrank(owner);
 
         tokenReceiver = new TokenReceiver(router, address(sourceRouter), address(weth));
-        //IUniswapV2Router02 _swapRouter, address _WETH9, address _ccipRouter, address _link, address _receiver
         tokenSender = new TokenSender(
             router, address(weth), address(destinationRouter), address(linkToken), address(tokenReceiver), owner
         );
         ccipLocalSimulator.requestLinkFromFaucet(address(tokenSender), 5 ether);
         assertEq(linkToken.balanceOf(address(tokenSender)), 5 ether);
 
-        vm.stopPrank();
-
         token = new Token();
+
+        deal(owner, 10 ether);
         weth.deposit{value: 10 ether}();
 
         token.approve(address(router), type(uint256).max);
@@ -76,67 +73,46 @@ contract UniswapTests is Test {
         IUniswapV2Router01(router).addLiquidity(
             address(token),
             address(weth),
-            token.balanceOf(address(this)),
-            weth.balanceOf(address(this)),
+            token.balanceOf(owner),
+            weth.balanceOf(owner),
             0,
             0,
-            address(this),
+            owner,
             block.timestamp + 1000
         );
 
         deal(user, 10 ether);
         token.mint(user, 1 ether);
+
+        vm.stopPrank();
     }
 
     function test_TokenSender() public {
-        token.mint(user, 9 ether);
         vm.startPrank(owner);
         tokenSender.allowlistDestinationChain(chainSelector, true);
         tokenReceiver.allowlistSourceChain(chainSelector, true);
         tokenReceiver.allowlistSender(address(tokenSender), true);
         vm.stopPrank();
 
-        console.log("Weth bal", weth.balanceOf(address(tokenSender)));
+        // Additional arguments, setting gas limit
+        bytes memory extraArgs = Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: 500_000}));
 
-        bytes memory extraArgs = Client._argsToBytes(
-            // Additional arguments, setting gas limit
-            Client.EVMExtraArgsV1({gasLimit: 500_000})
-        );
-
-        console.log("User token balance", token.balanceOf(user));
+        assertEq(token.balanceOf(user), 1 ether);
 
         vm.startPrank(user);
         token.approve(address(tokenSender), 1 ether);
         tokenSender.bridge(chainSelector, address(token), 1 ether, 1, extraArgs);
         vm.stopPrank();
 
-        console.log("User token balance", token.balanceOf(user));
+        uint256 amountAfterFee1 = _calculateAmountAfterFee(1 ether, 30);
+        uint256 amountAfterFee2 = _calculateAmountAfterFee(amountAfterFee1, 30);
+
+        assertGe(token.balanceOf(user), amountAfterFee2);
 
         (bytes32 messageId, address tokenAddress, uint256 tokenAmount) = tokenReceiver.getLastReceivedMessageDetails();
 
-        console.logBytes32(messageId);
-        console.log("Token address", tokenAddress);
-        console.log("Token amount", tokenAmount);
-
-        // console.log("Weth bal", weth.balanceOf(address(tokenSender)));
-    }
-
-    function test_TokenSwap() public {
-        address[] memory path = new address[](2);
-        path[0] = address(weth);
-        path[1] = address(token);
-
-        deal(user, 10 ether);
-        assertEq(address(tokenSwap.router()), address(router));
-        vm.startPrank(user);
-        weth.deposit{value: 1 ether}();
-        weth.approve(address(tokenSwap), 1 ether);
-        console.logUint(token.balanceOf(user));
-        console.logUint(weth.balanceOf(user));
-        uint256[] memory amounts = tokenSwap.swapExactTokensForTokens(1 ether, 0, path, user, block.timestamp + 1000);
-        console.logUint(amounts[1]);
-        console.logUint(token.balanceOf(user));
-        console.logUint(weth.balanceOf(user));
+        assertEq(tokenAddress, address(token));
+        assertEq(tokenAmount, token.balanceOf(user));
     }
 
     function test_UniswapFactory() public {
@@ -154,18 +130,9 @@ contract UniswapTests is Test {
         assertEq(router.WETH(), address(weth));
     }
 
-    // function test_addLiquidity() public {
-    //     Token token = new Token();
-
-    //     token.approve(address(router), type(uint256).max);
-
-    //     IUniswapV2Router01(router).addLiquidityETH{value: 10 ether}(
-    //         address(token),
-    //         token.balanceOf(address(this)),
-    //         0,
-    //         0,
-    //         address(this),
-    //         block.timestamp + 1000
-    //     );
-    // }
+    function _calculateAmountAfterFee(uint256 amountIn, uint24 fee) internal pure returns (uint256) {
+        // fee is in basis points (e.g., 30 = 0.3%)
+        uint256 feeMultiplier = 10000 - fee; // for 0.3% fee: 10000 - 30 = 9970
+        return (amountIn * feeMultiplier) / 10000;
+    }
 }

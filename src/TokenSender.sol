@@ -11,39 +11,19 @@ import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.s
 import {IUniswapV2Factory} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 import {IUniswapV2Pair} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
-contract TokenSender {
-    event DestinationChainAllowlisted(uint64 indexed destinationChainSelector, bool allowed);
-    event FeeTokenSet(address indexed oldFeeToken, address indexed newFeeToken);
-    event WETHSet(address indexed weth);
-    event MessageSent(
-        bytes32 indexed messageId,
-        uint64 indexed destinationChainSelector,
-        uint256 tokenAmount,
-        address feeToken,
-        uint256 fees
-    );
+import {ITokenSender} from "./interfaces/ITokenSender.sol";
 
-    error DestinationChainNotAllowlisted(uint64 destinationChainSelector);
-    error ZeroAddress();
-
+contract TokenSender is ITokenSender {
     IUniswapV2Router02 public swapRouter;
     IRouterClient public ccipRouter;
     IWrappedNative public weth;
+
     address public messageReceiver;
-    // uint24 public constant poolFee = 3000; // 0.3% fee
-
     address public feeToken_;
-
     address public owner;
 
     // Mapping to keep track of allowlisted destination chains.
     mapping(uint64 => bool) public allowlistedDestinationChains;
-
-    struct SwapDetails {
-        address originalToken;
-        uint256 minAmountOut;
-        address recipient;
-    }
 
     constructor(
         IUniswapV2Router02 _swapRouter,
@@ -63,19 +43,19 @@ contract TokenSender {
 
     /*----------- Admin Functions ----------- */
 
-    function allowlistDestinationChain(uint64 _destinationChainSelector, bool _allowed) external {
+    function allowlistDestinationChain(uint64 _destinationChainSelector, bool _allowed) external onlyOwner {
         allowlistedDestinationChains[_destinationChainSelector] = _allowed;
 
         emit DestinationChainAllowlisted(_destinationChainSelector, _allowed);
     }
 
-    function setFeeToken(address _feeToken) external {
+    function setFeeToken(address _feeToken) external onlyOwner {
         address oldFeeToken = feeToken_;
         feeToken_ = _feeToken;
         emit FeeTokenSet(oldFeeToken, feeToken_);
     }
 
-    function setWeth(address _WETH) external checkZeroAddress(_WETH) {
+    function setWeth(address _WETH) external checkZeroAddress(_WETH) onlyOwner {
         weth = IWrappedNative(payable(_WETH));
 
         emit WETHSet(_WETH);
@@ -83,6 +63,7 @@ contract TokenSender {
 
     /*----------- Public Functions ----------- */
 
+    ///@notice Make sure this contract has enough LINK to pay for fees
     function bridge(
         uint64 _destinationChainSelector,
         address _tokenAddress,
@@ -105,12 +86,6 @@ contract TokenSender {
         ERC20 feeToken = ERC20(message.feeToken);
 
         uint256 fee = ccipRouter.getFee(_destinationChainSelector, message);
-
-        // We need to transfer the fee to this contract and re-approve it to the router.
-        // Its not possible to have any leftover tokens in this path because we transferFrom the exact fee that CCIP
-        // requires from the contract.
-
-        // feeToken.transferFrom(owner, address(this), fee);
 
         feeToken.approve(address(ccipRouter), fee);
         weth.approve(address(ccipRouter), amounts[1]);
@@ -135,7 +110,6 @@ contract TokenSender {
 
     /// @notice Construct a CCIP message.
     /// @return Client.EVM2AnyMessage Returns an EVM2AnyMessage struct which contains information for sending a CCIP message.
-
     function _buildCCIPMessage(uint256 _wethAmount, bytes memory _data, bytes memory _extraArgs)
         internal
         view
@@ -185,6 +159,11 @@ contract TokenSender {
 
     modifier checkZeroAddress(address _address) {
         if (_address == address(0)) revert ZeroAddress();
+        _;
+    }
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert Unauthorized(msg.sender);
         _;
     }
 }
