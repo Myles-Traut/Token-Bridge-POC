@@ -2,7 +2,6 @@
 pragma solidity 0.8.23;
 pragma abicoder v2;
 
-
 // import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 
 import {ITypeAndVersion} from "@chainlink/contracts-ccip/src/v0.8/shared/interfaces/ITypeAndVersion.sol";
@@ -15,17 +14,13 @@ import {ERC20} from "solmate/tokens/ERC20.sol";
 
 import {IUniswapV2Router02} from "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
-contract TokenReceiver is
-  CCIPReceiver,
-  ITypeAndVersion
-{
-  
+contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
     // using EnumerableMap for EnumerableMap.Bytes32ToUintMap;
 
     /*----------  Events  ----------*/
-    
+
     event WETHSet(address indexed weth);
-    
+
     event MessageFailed(bytes32 indexed messageId, bytes reason);
     event MessageRecovered(bytes32 indexed messageId);
     event MessageReceived(
@@ -38,7 +33,7 @@ contract TokenReceiver is
     event SourceChainAllowlisted(uint64 indexed sourceChainSelector, bool allowed);
     event SenderAllowlisted(address indexed sender, bool allowed);
     event RouterSet(address indexed router);
-    
+
     error SourceChainNotAllowed(uint64 sourceChainSelector);
     error ZeroAddress();
     error SenderNotAllowed(address sender);
@@ -64,10 +59,9 @@ contract TokenReceiver is
 
     string public constant override typeAndVersion = "TokenTransfer V1.0";
 
-    IRouterClient public ccipRouter; 
+    IRouterClient public ccipRouter;
     IUniswapV2Router02 public swapRouter;
     IWrappedNative public weth;
-
 
     bytes32 private _lastReceivedMessageId;
     uint256 private _lastReceivedTokenAmount;
@@ -77,7 +71,6 @@ contract TokenReceiver is
 
     // Keep track of allowlisted source chains.
     mapping(uint64 => bool) public allowlistedSourceChains;
-
 
     // Keep track of allowlisted senders.
     mapping(address => bool) public allowlistedSenders;
@@ -97,46 +90,36 @@ contract TokenReceiver is
 
     /*----------- Admin Functions ----------- */
 
-    function allowlistSourceChain(
-        uint64 _sourceChainSelector,
-        bool _allowed
-    ) external {
+    function allowlistSourceChain(uint64 _sourceChainSelector, bool _allowed) external {
         allowlistedSourceChains[_sourceChainSelector] = _allowed;
 
         emit SourceChainAllowlisted(_sourceChainSelector, _allowed);
     }
 
-    function allowlistSender(
-        address _sender,
-        bool _allowed
-    ) external checkZeroAddress(_sender) {
+    function allowlistSender(address _sender, bool _allowed) external checkZeroAddress(_sender) {
         allowlistedSenders[_sender] = _allowed;
 
         emit SenderAllowlisted(_sender, _allowed);
     }
 
-    function setRouter(
-        address _router
-    ) external {
+    function setRouter(address _router) external {
         ccipRouter = IRouterClient(_router);
 
         emit RouterSet(_router);
     }
 
-    function setWeth(
-        address _WETH
-    ) external checkZeroAddress(_WETH) {
+    function setWeth(address _WETH) external checkZeroAddress(_WETH) {
         weth = IWrappedNative(payable(_WETH));
 
         emit WETHSet(_WETH);
-    } 
+    }
 
     /*---------- Uniswap Functions ----------*/
     function _swapExactTokensForTokens(
         uint256 amountIn,
-        uint256 amountOutMin, 
-        address[] memory path, 
-        address to, 
+        uint256 amountOutMin,
+        address[] memory path,
+        address to,
         uint256 deadline
     ) internal returns (uint256[] memory amounts) {
         // ERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
@@ -146,24 +129,21 @@ contract TokenReceiver is
 
     /*---------- CCIP Functions ----------*/
 
-    /** @notice The entrypoint for the CCIP router to call. This function should  never revert.
-    * All errors should be handled internally in this contract.
-    * @param message The message to process.
-    * @dev Extremely important to ensure only router calls this.
-    */
-    function ccipReceive(
-        Client.Any2EVMMessage calldata message
-    )
+    /**
+     * @notice The entrypoint for the CCIP router to call. This function should  never revert.
+     * All errors should be handled internally in this contract.
+     * @param message The message to process.
+     * @dev Extremely important to ensure only router calls this.
+     */
+    function ccipReceive(Client.Any2EVMMessage calldata message)
         external
         override
         onlyRouter
-        onlyAllowlisted(
-        message.sourceChainSelector,
-        abi.decode(message.sender, (address))
-        )
+        onlyAllowlisted(message.sourceChainSelector, abi.decode(message.sender, (address)))
     {
         /* solhint-disable no-empty-blocks */
-        try this.processMessage(message) {} catch (bytes memory err) {
+        try this.processMessage(message) {}
+        catch (bytes memory err) {
             // _failedMessages.set(message.messageId, uint256(ErrorCode.FAILED));
             messageContents[message.messageId] = message;
             // Don't revert so CCIP doesn't revert. Emit event instead.
@@ -173,15 +153,10 @@ contract TokenReceiver is
         }
     }
 
-    function processMessage(
-        Client.Any2EVMMessage calldata _message
-    )
+    function processMessage(Client.Any2EVMMessage calldata _message)
         external
         onlySelf
-        onlyAllowlisted(
-        _message.sourceChainSelector,
-        abi.decode(_message.sender, (address))
-        )
+        onlyAllowlisted(_message.sourceChainSelector, abi.decode(_message.sender, (address)))
     {
         _ccipReceive(_message);
     }
@@ -217,7 +192,8 @@ contract TokenReceiver is
         path[0] = address(weth);
         path[1] = details.originalToken;
 
-        uint256[] memory amounts = _swapExactTokensForTokens(wethAmount, details.minAmountOut, path, details.recipient, block.timestamp + 1000);
+        uint256[] memory amounts =
+            _swapExactTokensForTokens(wethAmount, details.minAmountOut, path, details.recipient, block.timestamp + 1000);
 
         tokenAmount = amounts[1];
 
@@ -229,46 +205,33 @@ contract TokenReceiver is
     /// @notice Receive the wrapped ether and unwraps it.
     /// @notice Receive the lastest unbackedRswETH amount and transfers it to the oft adaptor / lockbox.
     /// @param message The CCIP message containing the wrapped ether amount, ETH amount wrapped on L2 and the unbackedRswETH amount.
-    function _ccipReceive(
-        Client.Any2EVMMessage memory message
-    )
+    function _ccipReceive(Client.Any2EVMMessage memory message)
         internal
         override
-        onlyAllowlisted(
-        message.sourceChainSelector,
-        abi.decode(message.sender, (address))
-        )
+        onlyAllowlisted(message.sourceChainSelector, abi.decode(message.sender, (address)))
     {
         uint256 tokenAmount = _executeMessage(message);
 
         emit MessageReceived(
-        message.messageId,
-        message.sourceChainSelector,
-        abi.decode(message.sender, (address)),
-        tokenAmount,
-        _lastReceivedTokenAddress
+            message.messageId,
+            message.sourceChainSelector,
+            abi.decode(message.sender, (address)),
+            tokenAmount,
+            _lastReceivedTokenAddress
         );
     }
 
     /*----------  Public View Functions  ----------*/
 
     /**
-    * @notice Returns the details of the last CCIP received message.
-    */
+     * @notice Returns the details of the last CCIP received message.
+     */
     function getLastReceivedMessageDetails()
         public
         view
-        returns (
-        bytes32 messageId,
-        address tokenAddress,
-        uint256 tokenAmount
-        )
+        returns (bytes32 messageId, address tokenAddress, uint256 tokenAmount)
     {
-        return (
-        _lastReceivedMessageId,
-        _lastReceivedTokenAddress,
-        _lastReceivedTokenAmount
-        );
+        return (_lastReceivedMessageId, _lastReceivedTokenAddress, _lastReceivedTokenAmount);
     }
 
     //   /**
@@ -298,21 +261,23 @@ contract TokenReceiver is
 
     /*----------  Modifiers  ----------*/
 
-
     modifier checkZeroAddress(address _address) {
         if (_address == address(0)) revert ZeroAddress();
         _;
     }
 
     modifier onlyAllowlisted(uint64 _sourceChainSelector, address _sender) {
-        if (!allowlistedSourceChains[_sourceChainSelector])
-        revert SourceChainNotAllowed(_sourceChainSelector);
+        if (!allowlistedSourceChains[_sourceChainSelector]) {
+            revert SourceChainNotAllowed(_sourceChainSelector);
+        }
         if (!allowlistedSenders[_sender]) revert SenderNotAllowed(_sender);
         _;
     }
-    /** @dev Modifier to allow only the contract itself to execute a function.
-    * Throws an exception if called by any account other than the contract itself.
-    */
+    /**
+     * @dev Modifier to allow only the contract itself to execute a function.
+     * Throws an exception if called by any account other than the contract itself.
+     */
+
     modifier onlySelf() {
         if (msg.sender != address(this)) revert OnlySelf();
         _;

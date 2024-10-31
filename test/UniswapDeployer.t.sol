@@ -17,7 +17,7 @@ import {TokenReceiver} from "../src/TokenReceiver.sol";
 import {IRouterClient, LinkToken, WETH9} from "@chainlink/local/src/ccip/CCIPLocalSimulator.sol";
 import {CCIPLocalSimulator} from "@chainlink/local/src/ccip/CCIPLocalSimulator.sol";
 
-import {Client} from"@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
+import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 
 contract UniswapTests is Test {
     IUniswapV2Factory public factory = IUniswapV2Factory(0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f);
@@ -31,10 +31,10 @@ contract UniswapTests is Test {
     CCIPLocalSimulator public ccipLocalSimulator;
 
     uint64 public chainSelector;
-     IRouterClient public sourceRouter;
-     IRouterClient public destinationRouter;
-     WETH9 public wrappedNative;
-     LinkToken public linkToken;
+    IRouterClient public sourceRouter;
+    IRouterClient public destinationRouter;
+    WETH9 public wrappedNative;
+    LinkToken public linkToken;
 
     address user = makeAddr("user");
     address owner = makeAddr("owner");
@@ -50,13 +50,8 @@ contract UniswapTests is Test {
 
         ccipLocalSimulator = new CCIPLocalSimulator();
 
-        (
-            chainSelector,
-            sourceRouter,
-            destinationRouter,
-            wrappedNative,
-            linkToken,,
-        ) = ccipLocalSimulator.configuration();
+        (chainSelector, sourceRouter, destinationRouter, wrappedNative, linkToken,,) =
+            ccipLocalSimulator.configuration();
 
         tokenSwap = new TokenSwap(address(router));
 
@@ -64,7 +59,9 @@ contract UniswapTests is Test {
 
         tokenReceiver = new TokenReceiver(router, address(sourceRouter), address(weth));
         //IUniswapV2Router02 _swapRouter, address _WETH9, address _ccipRouter, address _link, address _receiver
-        tokenSender = new TokenSender(router, address(weth), address(destinationRouter), address(linkToken), address(tokenReceiver), owner);
+        tokenSender = new TokenSender(
+            router, address(weth), address(destinationRouter), address(linkToken), address(tokenReceiver), owner
+        );
         ccipLocalSimulator.requestLinkFromFaucet(address(tokenSender), 5 ether);
         assertEq(linkToken.balanceOf(address(tokenSender)), 5 ether);
 
@@ -79,8 +76,8 @@ contract UniswapTests is Test {
         IUniswapV2Router01(router).addLiquidity(
             address(token),
             address(weth),
-            token.balanceOf(address(this)), 
-            weth.balanceOf(address(this)), 
+            token.balanceOf(address(this)),
+            weth.balanceOf(address(this)),
             0,
             0,
             address(this),
@@ -89,7 +86,6 @@ contract UniswapTests is Test {
 
         deal(user, 10 ether);
         token.mint(user, 1 ether);
-
     }
 
     function test_TokenSender() public {
@@ -116,11 +112,7 @@ contract UniswapTests is Test {
 
         console.log("User token balance", token.balanceOf(user));
 
-        (
-            bytes32 messageId,
-            address tokenAddress,
-            uint256 tokenAmount
-        ) = tokenReceiver.getLastReceivedMessageDetails();
+        (bytes32 messageId, address tokenAddress, uint256 tokenAmount) = tokenReceiver.getLastReceivedMessageDetails();
 
         console.logBytes32(messageId);
         console.log("Token address", tokenAddress);
@@ -166,10 +158,10 @@ contract UniswapTests is Test {
     //     Token token = new Token();
 
     //     token.approve(address(router), type(uint256).max);
-        
+
     //     IUniswapV2Router01(router).addLiquidityETH{value: 10 ether}(
-    //         address(token), 
-    //         token.balanceOf(address(this)), 
+    //         address(token),
+    //         token.balanceOf(address(this)),
     //         0,
     //         0,
     //         address(this),
