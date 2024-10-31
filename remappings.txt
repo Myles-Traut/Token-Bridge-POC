@@ -3,3 +3,4 @@
 @uniswap/lib/contracts/=lib/solidity-lib/contracts/
 @chainlink/contracts-ccip/src/v0.8/=lib/chainlink-brownie-contracts/contracts/src/v0.8/
 @chainlink/local/=lib/chainlink-local/
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/

@@ -2,7 +2,7 @@
 pragma solidity 0.8.23;
 pragma abicoder v2;
 
-// import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 
 import {ITypeAndVersion} from "@chainlink/contracts-ccip/src/v0.8/shared/interfaces/ITypeAndVersion.sol";
 import {IWrappedNative} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IWrappedNative.sol";
@@ -15,7 +15,7 @@ import {ERC20} from "solmate/tokens/ERC20.sol";
 import {IUniswapV2Router02} from "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
 contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
-    // using EnumerableMap for EnumerableMap.Bytes32ToUintMap;
+    using EnumerableMap for EnumerableMap.Bytes32ToUintMap;
 
     /*----------  Events  ----------*/
 
@@ -79,7 +79,7 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
     mapping(bytes32 => Client.Any2EVMMessage) public messageContents;
 
     // Contains failed messages and their state.
-    // EnumerableMap.Bytes32ToUintMap internal _failedMessages;
+    EnumerableMap.Bytes32ToUintMap internal _failedMessages;
 
     constructor(IUniswapV2Router02 _swapRouter, address _ccipRouter, address _weth) CCIPReceiver(_ccipRouter) {
         ccipRouter = IRouterClient(_ccipRouter);
@@ -144,7 +144,7 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
         /* solhint-disable no-empty-blocks */
         try this.processMessage(message) {}
         catch (bytes memory err) {
-            // _failedMessages.set(message.messageId, uint256(ErrorCode.FAILED));
+            _failedMessages.set(message.messageId, uint256(ErrorCode.FAILED));
             messageContents[message.messageId] = message;
             // Don't revert so CCIP doesn't revert. Emit event instead.
             // The message can be retried later without having to do manual execution of CCIP.
@@ -161,25 +161,23 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
         _ccipReceive(_message);
     }
 
-    //   function retryFailedMessage(
-    //     bytes32 messageId
-    //   ) external {
-    //     if (!_failedMessages.contains(messageId)) {
-    //       revert MessageNotFound(messageId);
-    //     }
-    //     if (_failedMessages.get(messageId) != uint256(ErrorCode.FAILED)) {
-    //       revert MessageNotFailed(messageId);
-    //     }
+    function retryFailedMessage(bytes32 messageId) external {
+        if (!_failedMessages.contains(messageId)) {
+            revert MessageNotFound(messageId);
+        }
+        if (_failedMessages.get(messageId) != uint256(ErrorCode.FAILED)) {
+            revert MessageNotFailed(messageId);
+        }
 
-    //     // Set the error code to RESOLVED to disallow reentry and multiple retries of the same failed message.
-    //     _failedMessages.set(messageId, uint256(ErrorCode.RESOLVED));
+        // Set the error code to RESOLVED to disallow reentry and multiple retries of the same failed message.
+        _failedMessages.set(messageId, uint256(ErrorCode.RESOLVED));
 
-    //     Client.Any2EVMMessage memory message = messageContents[messageId];
+        Client.Any2EVMMessage memory message = messageContents[messageId];
 
-    //     _executeMessage(message);
+        _executeMessage(message);
 
-    //     emit MessageRecovered(messageId);
-    //   }
+        emit MessageRecovered(messageId);
+    }
 
     /*----------  Internal Functions  ----------*/
 
@@ -234,30 +232,27 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
         return (_lastReceivedMessageId, _lastReceivedTokenAddress, _lastReceivedTokenAmount);
     }
 
-    //   /**
-    //    * @notice Retrieves a paginated list of failed messages.
-    //    * @dev This function returns a subset of failed messages defined by `offset` and `limit` parameters. It ensures that the pagination parameters are within the bounds of the available data set.
-    //    * @param offset The index of the first failed message to return, enabling pagination by skipping a specified number of messages from the start of the dataset.
-    //    * @param limit The maximum number of failed messages to return, restricting the size of the returned array.
-    //    * @return failedMessages An array of `FailedMessage` struct, each containing a `messageId` and an `errorCode` (RESOLVED or FAILED), representing the requested subset of failed messages. The length of the returned array is determined by the `limit` and the total number of failed messages.
-    //    */
-    //   function getFailedMessages(
-    //     uint256 offset,
-    //     uint256 limit
-    //   ) external view returns (FailedMessage[] memory) {
-    //     uint256 length = _failedMessages.length();
+    /**
+     * @notice Retrieves a paginated list of failed messages.
+     * @dev This function returns a subset of failed messages defined by `offset` and `limit` parameters. It ensures that the pagination parameters are within the bounds of the available data set.
+     * @param offset The index of the first failed message to return, enabling pagination by skipping a specified number of messages from the start of the dataset.
+     * @param limit The maximum number of failed messages to return, restricting the size of the returned array.
+     * @return failedMessages An array of `FailedMessage` struct, each containing a `messageId` and an `errorCode` (RESOLVED or FAILED), representing the requested subset of failed messages. The length of the returned array is determined by the `limit` and the total number of failed messages.
+     */
+    function getFailedMessages(uint256 offset, uint256 limit) external view returns (FailedMessage[] memory) {
+        uint256 length = _failedMessages.length();
 
-    //     // Calculate the actual number of items to return (can't exceed total length or requested limit)
-    //     uint256 returnLength = (offset + limit > length) ? length - offset : limit;
-    //     FailedMessage[] memory failedMessages = new FailedMessage[](returnLength);
+        // Calculate the actual number of items to return (can't exceed total length or requested limit)
+        uint256 returnLength = (offset + limit > length) ? length - offset : limit;
+        FailedMessage[] memory failedMessages = new FailedMessage[](returnLength);
 
-    //     // Adjust loop to respect pagination (start at offset, end at offset + limit or total length)
-    //     for (uint256 i = 0; i < returnLength; i++) {
-    //       (bytes32 messageId, uint256 errorCode) = _failedMessages.at(offset + i);
-    //       failedMessages[i] = FailedMessage(messageId, ErrorCode(errorCode));
-    //     }
-    //     return failedMessages;
-    //   }
+        // Adjust loop to respect pagination (start at offset, end at offset + limit or total length)
+        for (uint256 i = 0; i < returnLength; i++) {
+            (bytes32 messageId, uint256 errorCode) = _failedMessages.at(offset + i);
+            failedMessages[i] = FailedMessage(messageId, ErrorCode(errorCode));
+        }
+        return failedMessages;
+    }
 
     /*----------  Modifiers  ----------*/
 
