@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.23;
+pragma abicoder v2;
 
 import {IUniswapV2Router02} from "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
@@ -29,22 +30,29 @@ contract TokenSender {
     IUniswapV2Router02 public swapRouter;
     IRouterClient public ccipRouter;
     IWrappedNative public weth;
-    address public receiver;
+    address public messageReceiver;
     // uint24 public constant poolFee = 3000; // 0.3% fee
 
     address public feeToken_;
 
+    address public owner;
+
     // Mapping to keep track of allowlisted destination chains.
     mapping(uint64 => bool) public allowlistedDestinationChains;
 
-    
+    struct SwapDetails {
+        address originalToken;
+        uint256 minAmountOut;
+        address recipient;
+    }
 
-    constructor(IUniswapV2Router02 _swapRouter, address _WETH9, address _ccipRouter, address _link, address _receiver) {
+    constructor(IUniswapV2Router02 _swapRouter, address _WETH9, address _ccipRouter, address _link, address _receiver, address _owner) {
         swapRouter = _swapRouter;
         weth = IWrappedNative(payable(_WETH9));
-        receiver = _receiver;
+        messageReceiver = _receiver;
         feeToken_ = _link;
         ccipRouter = IRouterClient(_ccipRouter);
+        owner = _owner;
     }
 
     /*----------- Admin Functions ----------- */
@@ -79,48 +87,53 @@ contract TokenSender {
     function bridge(
         uint64 _destinationChainSelector,
         address _tokenAddress, 
-        uint256 _tokenAmountIn
-        // bytes memory _extraArgs
+        uint256 _tokenAmountIn,
+        uint256 _minAmountOut,
+        bytes memory _extraArgs
     )
         external
         onlyAllowlistedChain(_destinationChainSelector)
-        returns (uint256)
+        returns (bytes32 messageId)
     {
         address[] memory path = new address[](2);
         path[0] = _tokenAddress;
         path[1] = address(weth);
 
-        uint256[] memory amounts = _swapExactTokensForTokens(_tokenAmountIn, 0, path, address(this), block.timestamp + 1000);
+        uint256[] memory amounts = _swapExactTokensForTokens(_tokenAmountIn, _minAmountOut, path, address(this), block.timestamp + 1000);
 
-        // Client.EVM2AnyMessage memory message = _buildCCIPMessage(
-        //     amounts[1],
-        //     abi.encode(_tokenAddress),
-        //     _extraArgs
-        // );
+        SwapDetails memory details = SwapDetails({
+            originalToken: _tokenAddress,
+            minAmountOut: _minAmountOut,
+            recipient: msg.sender
+        });
 
-        // ERC20 feeToken = ERC20(message.feeToken);
+        Client.EVM2AnyMessage memory message = _buildCCIPMessage(
+            amounts[1],
+            abi.encode(details),
+            _extraArgs
+        );
 
-        // uint256 fee = ccipRouter.getFee(_destinationChainSelector, message);
+        ERC20 feeToken = ERC20(message.feeToken);
+
+        uint256 fee = ccipRouter.getFee(_destinationChainSelector, message);
 
         // We need to transfer the fee to this contract and re-approve it to the router.
         // Its not possible to have any leftover tokens in this path because we transferFrom the exact fee that CCIP
-        // requires from the caller.
-        // feeToken.approve(address(ccipRouter), fee);
-        // feeToken.transferFrom(msg.sender, address(this), fee);
+        // requires from the contract.
+        
+        // feeToken.transferFrom(owner, address(this), fee);
 
-        return amounts[1];
+        feeToken.approve(address(ccipRouter), fee);
+        weth.approve(address(ccipRouter), amounts[1]);
+        messageId = ccipRouter.ccipSend(_destinationChainSelector, message);
 
-        // bytes32 messageId = ccipRouter.ccipSend(_destinationChainSelector, message);
-
-        // emit MessageSent(
-        //     messageId,
-        //     _destinationChainSelector,
-        //     message.tokenAmounts[0].amount,
-        //     address(feeToken),
-        //     fee
-        // );
-
-        // return messageId;
+        emit MessageSent(
+            messageId,
+            _destinationChainSelector,
+            message.tokenAmounts[0].amount,
+            address(feeToken),
+            fee
+        );
     }
 
     /*---------- Internal Functions ----------*/
@@ -141,7 +154,7 @@ contract TokenSender {
     /// @return Client.EVM2AnyMessage Returns an EVM2AnyMessage struct which contains information for sending a CCIP message.
 
     function _buildCCIPMessage(
-        uint256 _tokenAmount,
+        uint256 _wethAmount,
         bytes memory _data,
         bytes memory _extraArgs
     ) internal view returns (Client.EVM2AnyMessage memory) {
@@ -149,12 +162,12 @@ contract TokenSender {
 
         tokenAmounts[0] = Client.EVMTokenAmount({
             token: address(weth),
-            amount: _tokenAmount
+            amount: _wethAmount
         });
 
         return
         Client.EVM2AnyMessage({
-            receiver: abi.encode(receiver),
+            receiver: abi.encode(messageReceiver),
             data: _data,
             tokenAmounts: tokenAmounts,
             extraArgs: _extraArgs,
@@ -166,15 +179,22 @@ contract TokenSender {
 
       function getFee(
         uint64 _destinationChainSelector,
-        uint256 _tokenAmount,
+        address _tokenAddress,
+        uint256 _minAmountOut,
+        uint256 _wethAmount,
         bytes memory _data,
         bytes memory _extraArgs
     ) external view returns (uint256) {
-        return
+        SwapDetails memory details = SwapDetails({
+            originalToken: _tokenAddress,
+            minAmountOut: _minAmountOut,
+            recipient: msg.sender
+        });
+        
         ccipRouter.getFee(
             _destinationChainSelector,
             _buildCCIPMessage(
-                _tokenAmount,
+                _wethAmount,
                 _data,
                 _extraArgs
             )

@@ -12,6 +12,7 @@ import {IUniswapV2Router01} from "@uniswap/v2-periphery/contracts/interfaces/IUn
 import {Token} from "../src/Token.sol";
 import {TokenSwap} from "../src/TokenSwap.sol";
 import {TokenSender} from "../src/TokenSender.sol";
+import {TokenReceiver} from "../src/TokenReceiver.sol";
 
 import {IRouterClient, LinkToken, WETH9} from "@chainlink/local/src/ccip/CCIPLocalSimulator.sol";
 import {CCIPLocalSimulator} from "@chainlink/local/src/ccip/CCIPLocalSimulator.sol";
@@ -26,6 +27,7 @@ contract UniswapTests is Test {
     Token public token;
     Token public token2;
     TokenSender public tokenSender;
+    TokenReceiver public tokenReceiver;
     CCIPLocalSimulator public ccipLocalSimulator;
 
     uint64 public chainSelector;
@@ -36,6 +38,11 @@ contract UniswapTests is Test {
 
     address user = makeAddr("user");
     address owner = makeAddr("owner");
+
+    struct EVMTokenAmount {
+        address token; // token address on the local chain.
+        uint256 amount; // Amount of tokens.
+    }
 
     function setUp() public {
         UniswapDeployer deployer = new UniswapDeployer();
@@ -55,8 +62,12 @@ contract UniswapTests is Test {
 
         vm.startPrank(owner);
 
+        tokenReceiver = new TokenReceiver(router, address(sourceRouter), address(weth));
         //IUniswapV2Router02 _swapRouter, address _WETH9, address _ccipRouter, address _link, address _receiver
-        tokenSender = new TokenSender(router, address(weth), address(sourceRouter), address(linkToken), address(0));
+        tokenSender = new TokenSender(router, address(weth), address(destinationRouter), address(linkToken), address(tokenReceiver), owner);
+        ccipLocalSimulator.requestLinkFromFaucet(address(tokenSender), 5 ether);
+        assertEq(linkToken.balanceOf(address(tokenSender)), 5 ether);
+
         vm.stopPrank();
 
         token = new Token();
@@ -77,29 +88,59 @@ contract UniswapTests is Test {
         );
 
         deal(user, 10 ether);
-        token.mint(user, 10 ether);
+        token.mint(user, 1 ether);
+
     }
 
     function test_TokenSender() public {
-        token.mint(user, 10 ether);
+        token.mint(user, 9 ether);
         vm.startPrank(owner);
         tokenSender.allowlistDestinationChain(chainSelector, true);
+        tokenReceiver.allowlistSourceChain(chainSelector, true);
+        tokenReceiver.allowlistSender(address(tokenSender), true);
         vm.stopPrank();
+
+        console.log("Weth bal", weth.balanceOf(address(tokenSender)));
+
+        bytes memory extraArgs = Client._argsToBytes(
+            // Additional arguments, setting gas limit
+            Client.EVMExtraArgsV1({gasLimit: 500_000})
+        );
+
+        console.log("User token balance", token.balanceOf(user));
 
         vm.startPrank(user);
         token.approve(address(tokenSender), 1 ether);
-        tokenSender.bridge(chainSelector, address(token), 1 ether);
+        tokenSender.bridge(chainSelector, address(token), 1 ether, 1, extraArgs);
         vm.stopPrank();
+
+        console.log("User token balance", token.balanceOf(user));
+
+        (
+            bytes32 messageId,
+            address tokenAddress,
+            uint256 tokenAmount
+        ) = tokenReceiver.getLastReceivedMessageDetails();
+
+        console.logBytes32(messageId);
+        console.log("Token address", tokenAddress);
+        console.log("Token amount", tokenAmount);
+
+        // console.log("Weth bal", weth.balanceOf(address(tokenSender)));
     }
 
     function test_TokenSwap() public {
         address[] memory path = new address[](2);
-        path[0] = address(token);
-        path[1] = address(weth);
+        path[0] = address(weth);
+        path[1] = address(token);
 
+        deal(user, 10 ether);
         assertEq(address(tokenSwap.router()), address(router));
         vm.startPrank(user);
-        token.approve(address(tokenSwap), 1 ether);
+        weth.deposit{value: 1 ether}();
+        weth.approve(address(tokenSwap), 1 ether);
+        console.logUint(token.balanceOf(user));
+        console.logUint(weth.balanceOf(user));
         uint256[] memory amounts = tokenSwap.swapExactTokensForTokens(1 ether, 0, path, user, block.timestamp + 1000);
         console.logUint(amounts[1]);
         console.logUint(token.balanceOf(user));
