@@ -57,7 +57,13 @@ contract TokenBridgeTests is Test {
 
         tokenReceiver = new TokenReceiver(router, address(sourceRouter), address(weth));
         tokenSender = new TokenSender(
-            router, address(weth), address(destinationRouter), address(linkToken), address(tokenReceiver), owner
+            router,
+            address(factory),
+            address(weth),
+            address(destinationRouter),
+            address(linkToken),
+            address(tokenReceiver),
+            owner
         );
         ccipLocalSimulator.requestLinkFromFaucet(address(tokenSender), 5 ether);
         assertEq(linkToken.balanceOf(address(tokenSender)), 5 ether);
@@ -101,7 +107,7 @@ contract TokenBridgeTests is Test {
 
         vm.startPrank(user);
         token.approve(address(tokenSender), 1 ether);
-        tokenSender.bridge(chainSelector, address(token), 1 ether, 1, extraArgs);
+        tokenSender.bridge(chainSelector, address(token), 1 ether, 1, block.timestamp + 100, extraArgs);
         vm.stopPrank();
 
         uint256 amountAfterFee1 = _calculateAmountAfterFee(1 ether, 30);
