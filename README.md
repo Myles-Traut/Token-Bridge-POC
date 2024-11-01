@@ -20,6 +20,11 @@ This repository contains a swap and bridge implementation using UniswapV2 and th
 -   **More slippage exposure**
 -   **Not optimal for tokens that don't need conversion (e.g., stablecoins)**
 
+## Potential improvements
+
+-   Adding more DEX options for better liquidity
+-   Adding direct bridging path for common tokens (e.g. use CCIP lanes for stable coins)
+
 ## Foundry
 
 **Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
