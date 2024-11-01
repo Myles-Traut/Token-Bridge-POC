@@ -18,6 +18,7 @@ This repository contains a swap and bridge implementation using UniswapV2 and th
 
 -   **Higher fees due to double swaps**
 -   **More slippage exposure**
+-   **Potential for front-running**
 -   **Not optimal for tokens that don't need conversion (e.g., stablecoins)**
 
 ## Potential improvements
