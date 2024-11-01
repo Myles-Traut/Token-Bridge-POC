@@ -3,6 +3,9 @@ pragma solidity 0.8.23;
 pragma abicoder v2;
 
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {ITypeAndVersion} from "@chainlink/contracts-ccip/src/v0.8/shared/interfaces/ITypeAndVersion.sol";
 import {IWrappedNative} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IWrappedNative.sol";
@@ -13,61 +16,22 @@ import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/
 import {ERC20} from "solmate/tokens/ERC20.sol";
 
 import {IUniswapV2Router02} from "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
+import {IUniswapV2Factory} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 
-contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
+import {ITokenReceiver} from "./interfaces/ITokenReceiver.sol";
+
+contract TokenReceiver is CCIPReceiver, ITypeAndVersion, ITokenReceiver, Ownable, ReentrancyGuard, Pausable {
     using EnumerableMap for EnumerableMap.Bytes32ToUintMap;
-
-    /*----------  Events  ----------*/
-
-    event WETHSet(address indexed weth);
-
-    event MessageFailed(bytes32 indexed messageId, bytes reason);
-    event MessageRecovered(bytes32 indexed messageId);
-    event MessageReceived(
-        bytes32 indexed messageId,
-        uint64 indexed sourceChainSelector,
-        address sender,
-        uint256 tokenAmount,
-        address tokenAddress
-    );
-    event SourceChainAllowlisted(uint64 indexed sourceChainSelector, bool allowed);
-    event SenderAllowlisted(address indexed sender, bool allowed);
-    event RouterSet(address indexed router);
-
-    error SourceChainNotAllowed(uint64 sourceChainSelector);
-    error ZeroAddress();
-    error SenderNotAllowed(address sender);
-    error OnlySelf();
-    error MessageNotFound(bytes32 messageId);
-    error MessageNotFailed(bytes32 messageId);
-
-    enum ErrorCode {
-        RESOLVED,
-        FAILED
-    }
-
-    struct FailedMessage {
-        bytes32 messageId;
-        ErrorCode errorCode;
-    }
-
-    struct SwapDetails {
-        address originalToken;
-        uint256 minAmountOut;
-        address recipient;
-    }
-
-    string public constant override typeAndVersion = "TokenTransfer V1.0";
 
     IRouterClient public ccipRouter;
     IUniswapV2Router02 public swapRouter;
     IWrappedNative public weth;
 
+    string public constant override typeAndVersion = "TokenTransfer V1.0";
+
     bytes32 private _lastReceivedMessageId;
     uint256 private _lastReceivedTokenAmount;
     address private _lastReceivedTokenAddress;
-
-    uint24 public constant poolFee = 3000; // 0.3% fee
 
     // Keep track of allowlisted source chains.
     mapping(uint64 => bool) public allowlistedSourceChains;
@@ -81,7 +45,12 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
     // Contains failed messages and their state.
     EnumerableMap.Bytes32ToUintMap internal _failedMessages;
 
-    constructor(IUniswapV2Router02 _swapRouter, address _ccipRouter, address _weth) CCIPReceiver(_ccipRouter) {
+    constructor(IUniswapV2Router02 _swapRouter, address _ccipRouter, address _weth)
+        checkZeroAddress(_weth)
+        checkZeroAddress(_ccipRouter)
+        CCIPReceiver(_ccipRouter)
+        Ownable(msg.sender)
+    {
         ccipRouter = IRouterClient(_ccipRouter);
         swapRouter = _swapRouter;
         weth = IWrappedNative(payable(_weth));
@@ -90,56 +59,49 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
 
     /*----------- Admin Functions ----------- */
 
-    function allowlistSourceChain(uint64 _sourceChainSelector, bool _allowed) external {
+    function allowlistSourceChain(uint64 _sourceChainSelector, bool _allowed) external onlyOwner {
         allowlistedSourceChains[_sourceChainSelector] = _allowed;
 
         emit SourceChainAllowlisted(_sourceChainSelector, _allowed);
     }
 
-    function allowlistSender(address _sender, bool _allowed) external checkZeroAddress(_sender) {
+    function allowlistSender(address _sender, bool _allowed) external onlyOwner checkZeroAddress(_sender) {
         allowlistedSenders[_sender] = _allowed;
 
         emit SenderAllowlisted(_sender, _allowed);
     }
 
-    function setRouter(address _router) external {
+    function setRouter(address _router) external onlyOwner checkZeroAddress(_router) {
         ccipRouter = IRouterClient(_router);
 
         emit RouterSet(_router);
     }
 
-    function setWeth(address _WETH) external checkZeroAddress(_WETH) {
+    function setWeth(address _WETH) external onlyOwner checkZeroAddress(_WETH) {
         weth = IWrappedNative(payable(_WETH));
 
         emit WETHSet(_WETH);
     }
 
-    /*---------- Uniswap Functions ----------*/
-    function _swapExactTokensForTokens(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] memory path,
-        address to,
-        uint256 deadline
-    ) internal returns (uint256[] memory amounts) {
-        // ERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
-        ERC20(path[0]).approve(address(swapRouter), amountIn);
-        return swapRouter.swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline);
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+    }
+
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
     }
 
     /*---------- CCIP Functions ----------*/
 
-    /**
-     * @notice The entrypoint for the CCIP router to call. This function should  never revert.
-     * All errors should be handled internally in this contract.
-     * @param message The message to process.
-     * @dev Extremely important to ensure only router calls this.
-     */
+    /// @notice The entrypoint for the CCIP router to call. This function should never revert.
+    /// @param message The message to process.
+    /// @dev Extremely important to ensure only router calls this.
     function ccipReceive(Client.Any2EVMMessage calldata message)
         external
         override
         onlyRouter
         onlyAllowlisted(message.sourceChainSelector, abi.decode(message.sender, (address)))
+        whenNotPaused
     {
         /* solhint-disable no-empty-blocks */
         try this.processMessage(message) {}
@@ -157,11 +119,12 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
         external
         onlySelf
         onlyAllowlisted(_message.sourceChainSelector, abi.decode(_message.sender, (address)))
+        whenNotPaused
     {
         _ccipReceive(_message);
     }
 
-    function retryFailedMessage(bytes32 messageId) external {
+    function retryFailedMessage(bytes32 messageId) external nonReentrant {
         if (!_failedMessages.contains(messageId)) {
             revert MessageNotFound(messageId);
         }
@@ -169,7 +132,6 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
             revert MessageNotFailed(messageId);
         }
 
-        // Set the error code to RESOLVED to disallow reentry and multiple retries of the same failed message.
         _failedMessages.set(messageId, uint256(ErrorCode.RESOLVED));
 
         Client.Any2EVMMessage memory message = messageContents[messageId];
@@ -181,7 +143,18 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
 
     /*----------  Internal Functions  ----------*/
 
-    function _executeMessage(Client.Any2EVMMessage memory _message) internal returns (uint256 tokenAmount) {
+    function _swapExactTokensForTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] memory path,
+        address to,
+        uint256 deadline
+    ) internal returns (uint256[] memory amounts) {
+        ERC20(path[0]).approve(address(swapRouter), amountIn);
+        return swapRouter.swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline);
+    }
+
+    function _executeMessage(Client.Any2EVMMessage memory _message) internal nonReentrant returns (uint256 tokenAmount) {
         SwapDetails memory details = abi.decode(_message.data, (SwapDetails));
 
         uint256 wethAmount = _message.destTokenAmounts[0].amount;
@@ -190,8 +163,11 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
         path[0] = address(weth);
         path[1] = details.originalToken;
 
+        address pair = IUniswapV2Factory(swapRouter.factory()).getPair(address(weth), details.originalToken);
+        if (pair == address(0)) revert PairDoesNotExist(address(weth), details.originalToken);
+
         uint256[] memory amounts =
-            _swapExactTokensForTokens(wethAmount, details.minAmountOut, path, details.recipient, block.timestamp + 1000);
+            _swapExactTokensForTokens(wethAmount, details.minAmountOut, path, details.recipient, details.deadline);
 
         tokenAmount = amounts[1];
 
@@ -200,9 +176,6 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
         _lastReceivedTokenAddress = details.originalToken;
     }
 
-    /// @notice Receive the wrapped ether and unwraps it.
-    /// @notice Receive the lastest unbackedRswETH amount and transfers it to the oft adaptor / lockbox.
-    /// @param message The CCIP message containing the wrapped ether amount, ETH amount wrapped on L2 and the unbackedRswETH amount.
     function _ccipReceive(Client.Any2EVMMessage memory message)
         internal
         override
@@ -219,7 +192,7 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
         );
     }
 
-    /*----------  Public View Functions  ----------*/
+    /*----------  View Functions  ----------*/
 
     /**
      * @notice Returns the details of the last CCIP received message.
@@ -232,13 +205,6 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion {
         return (_lastReceivedMessageId, _lastReceivedTokenAddress, _lastReceivedTokenAmount);
     }
 
-    /**
-     * @notice Retrieves a paginated list of failed messages.
-     * @dev This function returns a subset of failed messages defined by `offset` and `limit` parameters. It ensures that the pagination parameters are within the bounds of the available data set.
-     * @param offset The index of the first failed message to return, enabling pagination by skipping a specified number of messages from the start of the dataset.
-     * @param limit The maximum number of failed messages to return, restricting the size of the returned array.
-     * @return failedMessages An array of `FailedMessage` struct, each containing a `messageId` and an `errorCode` (RESOLVED or FAILED), representing the requested subset of failed messages. The length of the returned array is determined by the `limit` and the total number of failed messages.
-     */
     function getFailedMessages(uint256 offset, uint256 limit) external view returns (FailedMessage[] memory) {
         uint256 length = _failedMessages.length();
 

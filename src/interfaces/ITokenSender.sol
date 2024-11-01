@@ -33,10 +33,12 @@ interface ITokenSender {
     /// @notice Details about the swap
     /// @custom:field originalToken The address of the token being bridged
     /// @custom:field minAmountOut The minimum amount of weth the token will be swapped for on uniswap
+    /// @custom:field deadline The deadline for the uniswap swap
     /// @custom:field recipient The recipient of the bridged funds
     struct SwapDetails {
         address originalToken;
         uint256 minAmountOut;
+        uint256 deadline;
         address recipient;
     }
 
@@ -118,6 +120,7 @@ interface ITokenSender {
         uint64 _destinationChainSelector,
         address _tokenAddress,
         uint256 _minAmountOut,
+        uint256 _deadline,
         uint256 _wethAmount,
         bytes memory _data,
         bytes memory _extraArgs
