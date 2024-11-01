@@ -25,6 +25,17 @@ This repository contains a swap and bridge implementation using UniswapV2 and th
 -   Adding more DEX options for better liquidity
 -   Adding direct bridging path for common tokens (e.g. use CCIP lanes for stable coins)
 
+## To Run Tests:
+
+-   Uncomment the UniswapV2Router02 import in `script/Imports.s.sol`
+-   Run `forge build` to build the UniswapV2Router02 contract artifact
+-   Comment the import again
+-   Uncomment the UniswapV2Factory import in `script/Imports.s.sol`
+-   Run `forge build` to build the UniswapV2Factory contract artifact
+-   Comment the import again
+-   Then add this hash to the `pairFor` function on line 24 in `lib/v2-periphery/contracts/libraries/UniswapV2Library.sol`: `77820097bae7b0b30c784fe9efdd81e53e0438eaedc27794a7682e3886a792d6`
+-   Run `forge test` to run the tests
+
 ## Foundry
 
 **Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
