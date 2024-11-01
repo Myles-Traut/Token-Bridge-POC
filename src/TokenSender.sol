@@ -117,8 +117,12 @@ contract TokenSender is ITokenSender, ReentrancyGuard, Ownable, Pausable {
         uint256[] memory amounts =
             _swapExactTokensForTokens(_tokenAmountIn, _minAmountOut, path, address(this), _deadline);
 
-        SwapDetails memory details =
-            SwapDetails({originalToken: _tokenAddress, minAmountOut: _minAmountOut, deadline: _deadline, recipient: msg.sender});
+        SwapDetails memory details = SwapDetails({
+            originalToken: _tokenAddress,
+            minAmountOut: _minAmountOut,
+            deadline: _deadline,
+            recipient: msg.sender
+        });
 
         Client.EVM2AnyMessage memory message = _buildCCIPMessage(amounts[1], abi.encode(details), _extraArgs);
 
@@ -214,8 +218,12 @@ contract TokenSender is ITokenSender, ReentrancyGuard, Ownable, Pausable {
         bytes memory _data,
         bytes memory _extraArgs
     ) external view returns (uint256) {
-        SwapDetails memory details =
-            SwapDetails({originalToken: _tokenAddress, minAmountOut: _minAmountOut, deadline: _deadline, recipient: msg.sender});
+        SwapDetails memory details = SwapDetails({
+            originalToken: _tokenAddress,
+            minAmountOut: _minAmountOut,
+            deadline: _deadline,
+            recipient: msg.sender
+        });
 
         ccipRouter.getFee(_destinationChainSelector, _buildCCIPMessage(_wethAmount, _data, _extraArgs));
     }

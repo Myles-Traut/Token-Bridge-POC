@@ -154,7 +154,11 @@ contract TokenReceiver is CCIPReceiver, ITypeAndVersion, ITokenReceiver, Ownable
         return swapRouter.swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline);
     }
 
-    function _executeMessage(Client.Any2EVMMessage memory _message) internal nonReentrant returns (uint256 tokenAmount) {
+    function _executeMessage(Client.Any2EVMMessage memory _message)
+        internal
+        nonReentrant
+        returns (uint256 tokenAmount)
+    {
         SwapDetails memory details = abi.decode(_message.data, (SwapDetails));
 
         uint256 wethAmount = _message.destTokenAmounts[0].amount;

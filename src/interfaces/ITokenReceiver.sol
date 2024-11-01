@@ -82,7 +82,10 @@ interface ITokenReceiver {
     /// @return messageId The message ID
     /// @return tokenAddress The token address
     /// @return tokenAmount The token amount
-    function getLastReceivedMessageDetails() external view returns (bytes32 messageId, address tokenAddress, uint256 tokenAmount);
+    function getLastReceivedMessageDetails()
+        external
+        view
+        returns (bytes32 messageId, address tokenAddress, uint256 tokenAmount);
 
     /// @notice Retrieves a paginated list of failed messages.
     /// @dev This function returns a subset of failed messages defined by `offset` and `limit` parameters. It ensures that the pagination parameters are within the bounds of the available data set.
